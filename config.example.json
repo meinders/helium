@@ -1,0 +1,31 @@
+{
+  "audioFormat": {
+    "bigEndian": false,
+    "bitsPerSample": 16,
+    "channels": 2,
+    "sampleRate": 44100
+  },
+  "normalize": {},
+  "encode": {
+    "format": "mp3",
+    "lameExecutable": "C:\\Program Files (x86)\\Lame for Audacity\\lame.exe",
+    "bitRate": {
+      "constant": 128
+    }
+  },
+  "store": {
+    "namingScheme": {
+      "elements": [
+        "recording",
+        {
+          "date": "yyyyMMdd"
+        },
+        {
+          "sequence": true
+        }
+      ],
+      "separator": "-"
+    },
+    "folder": "."
+  }
+}
