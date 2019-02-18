@@ -21,6 +21,7 @@ import java.io.*;
 import java.util.*;
 
 import org.jetbrains.annotations.*;
+import org.json.*;
 
 /**
  * Allows command-line options for LAME to be specified.
@@ -117,12 +118,13 @@ public class Mp3Options
 
 	public abstract static class BitRate
 	{
-		BitRate()
+		protected BitRate()
 		{
-			/* Prevent subclassing outside of this package. */
 		}
 
 		abstract void apply( Collection<String> command );
+
+		public abstract JSONObject save();
 	}
 
 	public static final class ConstantBitRate
@@ -152,6 +154,12 @@ public class Mp3Options
 				command.add( "-b" + bitRate );
 			}
 		}
+
+		@Override
+		public JSONObject save()
+		{
+			return new JSONObject().put( "constant", JSONObject.wrap( bitRate ) );
+		}
 	}
 
 	public static final class AverageBitRate
@@ -174,6 +182,12 @@ public class Mp3Options
 		{
 			command.add( "--abr" );
 			command.add( String.valueOf( bitRate ) );
+		}
+
+		@Override
+		public JSONObject save()
+		{
+			return new JSONObject().put( "average", bitRate );
 		}
 	}
 
@@ -200,6 +214,12 @@ public class Mp3Options
 			{
 				command.add( "-V" + quality );
 			}
+		}
+
+		@Override
+		public JSONObject save()
+		{
+			return new JSONObject().put( "variable", JSONObject.wrap( quality ) );
 		}
 	}
 }

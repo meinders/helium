@@ -48,8 +48,6 @@ public class Config
 	@Nullable
 	private EncodingFormat encodingFormat;
 
-	private File lameExecutable;
-
 	private File storageFolder;
 
 	private NamingScheme namingScheme;
@@ -57,13 +55,12 @@ public class Config
 	public Config()
 	{
 		mixerName = null;
-		audioFormat = new AudioFormat( AudioFormat.Encoding.PCM_SIGNED, 44100, 16, 2, 4, 44100, false );
+		audioFormat = parseAudioFormat( null );
 		normalize = false;
 		windowSize = 2.0;
 		maximumGain = 10.0;
 		normalizePerChannel = false;
 		encodingFormat = null;
-		lameExecutable = null;
 		storageFolder = new File( "." );
 		namingScheme = new NamingScheme();
 		namingScheme.setFormat( "\"recording\" date(yyyyMMdd) sequence" );
@@ -78,7 +75,6 @@ public class Config
 		windowSize = original.windowSize;
 		normalizePerChannel = original.normalizePerChannel;
 		encodingFormat = ( original.encodingFormat == null ) ? null : original.encodingFormat.clone();
-		lameExecutable = original.lameExecutable;
 		storageFolder = original.storageFolder;
 		namingScheme = new NamingScheme( original.namingScheme );
 	}
@@ -200,9 +196,10 @@ public class Config
 		}
 		else
 		{
-			try ( final OutputStream out = new FileOutputStream( file ) )
+			try ( final OutputStream out = new FileOutputStream( file );
+			      final Writer writer = new OutputStreamWriter( out, StandardCharsets.UTF_8 ) )
 			{
-				save().write( new OutputStreamWriter( out, StandardCharsets.UTF_8 ) );
+				save().write( writer, 2, 0 );
 			}
 		}
 	}
@@ -211,11 +208,7 @@ public class Config
 	{
 		mixerName = json.optString( "mixer", null );
 
-		final int channels = json.optInt( "sampleRate", audioFormat.getChannels() );
-		final int bitsPerSample = json.optInt( "bitsPerSample", audioFormat.getSampleSizeInBits() );
-		final int sampleRate = json.optInt( "channels", (int)audioFormat.getSampleRate() );
-		final boolean bigEndian = json.optBoolean( "bigEndian", audioFormat.isBigEndian() );
-		audioFormat = new AudioFormat( AudioFormat.Encoding.PCM_SIGNED, sampleRate, bitsPerSample, channels, bitsPerSample * channels / 8, sampleRate, bigEndian );
+		audioFormat = parseAudioFormat( json.optJSONObject( "audioFormat" ) );
 
 		/*
 		 * Normalization settings.
@@ -336,22 +329,60 @@ public class Config
 		}
 	}
 
+	private static AudioFormat parseAudioFormat( @Nullable final JSONObject json )
+	{
+		int sampleRate = 44100;
+		int bitsPerSample = 16;
+		int channels = 2;
+		boolean bigEndian = false;
+
+		if ( json != null )
+		{
+			sampleRate = json.optInt( "sampleRate", sampleRate );
+			bitsPerSample = json.optInt( "bitsPerSample", bitsPerSample );
+			channels = json.optInt( "channels", channels );
+			bigEndian = json.optBoolean( "bigEndian", bigEndian );
+		}
+
+		return new AudioFormat( AudioFormat.Encoding.PCM_SIGNED, sampleRate, bitsPerSample, channels, bitsPerSample * channels / 8, sampleRate, bigEndian );
+	}
+
 	@NotNull
 	private JSONObject save()
 	{
 		final JSONObject result = new JSONObject();
-		// TODO: Implement
+
+		result.put( "mixer", mixerName );
+
+		result.put( "audioFormat", new JSONObject()
+			.put( "sampleRate", audioFormat.getSampleRate() )
+			.put( "bitsPerSample", audioFormat.getSampleSizeInBits() )
+			.put( "channels", audioFormat.getChannels() )
+			.put( "bigEndian", audioFormat.isBigEndian() ) );
+
+
+		if ( normalize )
+		{
+			result.put( "normalize", new JSONObject()
+				.put( "normalizePerChannel", normalizePerChannel )
+				.put( "maximumGain", maximumGain )
+				.put( "windowSize", windowSize ) );
+		}
+
+		if ( encodingFormat != null )
+		{
+			result.put( "encode", encodingFormat.save() );
+		}
+
+		final JSONObject jsonStore = new JSONObject();
+		jsonStore.put( "folder", storageFolder.toString() );
+		if ( namingScheme != null )
+		{
+			jsonStore.put( "namingScheme", namingScheme.save() );
+		}
+		result.put( "store", jsonStore );
+
 		return result;
-	}
-
-	public File getLameExecutable()
-	{
-		return lameExecutable;
-	}
-
-	public void setLameExecutable( final File lameExecutable )
-	{
-		this.lameExecutable = lameExecutable;
 	}
 
 	/**
@@ -375,12 +406,20 @@ public class Config
 			}
 		}
 
+		public abstract JSONObject save();
+
 		public static final class Wave
 			extends EncodingFormat
 		{
 			public Wave()
 			{
 				// TODO: Add format options.
+			}
+
+			@Override
+			public JSONObject save()
+			{
+				return new JSONObject().put( "format", "wave" );
 			}
 		}
 
@@ -402,6 +441,31 @@ public class Config
 			public void setOptions( final Mp3Options options )
 			{
 				this.options = options;
+			}
+
+			@Override
+			public JSONObject save()
+			{
+				final JSONObject result = new JSONObject();
+
+				result.put( "lameExecutable", options.getExecutable().toString() );
+
+				switch ( options.getMode() )
+				{
+					case STEREO:
+						result.put( "mode", "stereo" );
+						break;
+					case JOINT_STEREO:
+						result.put( "mode", "joint-stereo" );
+						break;
+					case MONO:
+						result.put( "mode", "mono" );
+						break;
+				}
+
+				result.put( "bitRate", options.getBitRate().save() );
+
+				return result.put( "format", "wave" );
 			}
 		}
 	}
@@ -559,9 +623,22 @@ public class Config
 			}
 		}
 
+		public JSONObject save()
+		{
+			final JSONObject result = new JSONObject();
+			result.put( "separator", separator );
+			for ( final Element element : elements )
+			{
+				result.append( "elements", element.save() );
+			}
+			return result;
+		}
+
 		public abstract static class Element
 		{
 			abstract void append( StringBuilder result, File storageFolder );
+
+			public abstract Object save();
 		}
 
 		public static final class StringElement
@@ -588,6 +665,12 @@ public class Config
 			void append( final StringBuilder result, final File storageFolder )
 			{
 				result.append( value );
+			}
+
+			@Override
+			public Object save()
+			{
+				return value;
 			}
 		}
 
@@ -620,6 +703,12 @@ public class Config
 			void append( final StringBuilder result, final File storageFolder )
 			{
 				result.append( format.format( new Date() ) );
+			}
+
+			@Override
+			public Object save()
+			{
+				return new JSONObject().put( "date", format.toPattern() );
 			}
 		}
 
@@ -660,6 +749,12 @@ public class Config
 				{
 					result.append( sequenceNumber );
 				}
+			}
+
+			@Override
+			public Object save()
+			{
+				return new JSONObject().put( "sequence", true );
 			}
 		}
 	}
